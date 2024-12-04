@@ -1,0 +1,3 @@
+/Users/neilharia7/CLionProjects/virtual-memory-management/cmake-build-debug/CMakeFiles/virtual_memory_management.dir
+/Users/neilharia7/CLionProjects/virtual-memory-management/cmake-build-debug/CMakeFiles/edit_cache.dir
+/Users/neilharia7/CLionProjects/virtual-memory-management/cmake-build-debug/CMakeFiles/rebuild_cache.dir

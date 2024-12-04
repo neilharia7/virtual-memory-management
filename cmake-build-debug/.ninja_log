@@ -1,0 +1,4 @@
+# ninja log v6
+1	68	1733281318330356359	build.ninja	c9f4f152a1ad67b9
+0	508	1733281318339427292	CMakeFiles/virtual_memory_management.dir/main.cpp.o	cb756704d3803d65
+510	554	1733281318849217789	virtual_memory_management	afa86cab4c0de794
