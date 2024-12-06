@@ -3,137 +3,297 @@
 #include <vector>
 #include <deque>
 #include <array>
-#include <iomanip>
 #include <string>
-#include <sstream>
+#include <iomanip>
+#include <cstdint>
+#include <optional>
+#include <algorithm>
 
-#define PAGE_TABLE_SIZE 256
-#define PAGE_SIZE 256
-#define TLB_SIZE 16
-#define FRAME_SIZE 256
-#define FRAMES 256
-#define PHYSICAL_MEMORY FRAMES * PAGE_SIZE
+#define PAGE_TABLE_SIZE 256     // max number of pages in the virtual mem
+#define PAGE_SIZE 256           // size of each page in bytes
+#define TLB_SIZE 16             // buffer size
+#define FRAME_SIZE 256          // size of each physical mem frame
+#define FRAMES 256              // total frames in the physical mem
+#define BITSHIFT 8
+#define MASK 0xFFFF             // mask to extract the lower 16 bits from the logical address
+#define OFFSET_MASK 0xFF        // mask to extract the lowest 8 bits from logical address
 
-int main() {
-    // Initialize physical memory
-    std::vector<unsigned char> physical_memory(PHYSICAL_MEMORY);
+using namespace std;
 
-    // Initialize TLB as a deque of pairs (page_number, frame_number)
-    std::deque<std::pair<int, int>> TLB;
 
-    // Initialize Page Table with all entries set to -1 (indicating that the page is not in memory)
-    std::array<int, PAGE_TABLE_SIZE> page_table;
-    page_table.fill(-1);
+/** @class TLB
+ *  @brief Translational Lookaside Buffer implementation
+ *
+ * Purpose: To provide a fast cache for page number to frame number translation
+ *
+ */
+class TLB {
+private:
+    // internal storage for TLB entries
+    // using deque to facilitate FIFO replacement strategy
+    // entry -> pair of <page number, frame number>
+    std::deque<std::pair<uint8_t, uint8_t>> tlbEntries;
+public:
+    /**
+     * Searches for a page number in the TLB
+     * @param pageNumber the virtual page number to lookup
+     * @return optional frame number on TLB hit, empty otherwise
+     */
+    std::optional<uint8_t> getFrameNumber(uint8_t pageNumber) {
+        // iterate through the TLB to find a matching page number
+        for (auto iterator = tlbEntries.begin(); iterator != tlbEntries.end(); ++iterator) {
+            if (iterator->first == pageNumber) {
+                // got it, capture frame
+                uint8_t frameNumber = iterator->second;
 
-    // Variables to keep track of statistics
-    int tlb_hits = 0;
-    int page_faults = 0;
-    int total_addresses = 0;
-    int next_frame = 0;  // Next free frame in physical memory
-
-    // Open the backing store file
-    std::ifstream backing_store("BACKING_STORE.bin", std::ios::in | std::ios::binary);
-    if (!backing_store) {
-        std::cerr << "Error: Unable to open BACKING_STORE.bin" << std::endl;
-        return 1;
+                // remove current entry and add it to the back
+                // make it work like LRU
+                tlbEntries.erase(iterator);
+                tlbEntries.emplace_back(pageNumber, frameNumber);
+                return frameNumber;
+            }
+        }
+        return std::nullopt; // TLB miss
     }
 
-    // Open the addresses file
-    std::ifstream address_file("addresses.txt");
-    if (!address_file) {
-        std::cerr << "Error: Unable to open addresses.txt" << std::endl;
-        return 1;
+    /**
+     * This func adds a new entry to the TLB, while managing capacity
+     * @param pageNumber virtual page number to add
+     * @param frameNumber corresponding physical frame number
+     */
+    void addEntry(uint8_t pageNumber, uint8_t frameNumber) {
+
+        // remove any existing entry for the same page to prevent duplicates
+        auto iterator = std::find_if(tlbEntries.begin(), tlbEntries.end(),
+                               [&](const auto& entry) { return entry.first == pageNumber; });
+        if (iterator != tlbEntries.end()) {
+            tlbEntries.erase(iterator);
+        }
+
+        // enforce TLB size limit using FIFO
+        if (tlbEntries.size() >= TLB_SIZE) {
+            tlbEntries.pop_front(); // nuke the oldest entry
+        }
+
+        // add new entry to the end of queue
+        tlbEntries.emplace_back(pageNumber, frameNumber);
+    }
+};
+
+/** @class PageTable
+ *  @brief Manages virtual-to-physical memory mapping
+ */
+class PageTable {
+private:
+    // stores frame numbers, with -1 -> invalid/unloaded page
+    std::array<int16_t, PAGE_TABLE_SIZE> pageTable{};
+public:
+    /**
+     * Constructor: initialize all entries as invalid (-1)
+     */
+    PageTable() {
+        pageTable.fill(-1);
     }
 
+    /**
+     * Fetches the frame number for a given page
+     * @param pageNumber virtual page number to lookup
+     * @return optional frame number or empty in case of page fault
+     */
+    std::optional<uint8_t> getFrameNumber(uint8_t pageNumber) {
+        int16_t frameNumber = pageTable[pageNumber];
+        return frameNumber == -1 ? std::nullopt : static_cast<uint8_t>(frameNumber);
+    }
+
+    /**
+     * Updates page table with a new page <> frame mapping
+     * @param pageNumber virtual page number
+     * @param frameNumber physical frame number
+     */
+    void setFrameNumber(uint8_t pageNumber, uint8_t frameNumber) {
+        pageTable[pageNumber] = frameNumber;
+    }
+};
+
+/** @class PhysicalMemory
+ *  @brief Simulates physical memory organization
+ */
+class PhysicalMemory {
+private:
+    // 2D array to represent physical memory frames
+    // each frame -> fixed size array of bytes
+    std::array<std::array<int8_t, FRAME_SIZE>, FRAMES> memory{}; // Memory frames
+public:
+    /**
+     *  Loads a complete page into a specific memory frame
+     * @param frameNumber target frame to load the page into
+     * @param pageData pointer of the source pageData
+     */
+    void loadPage(uint8_t frameNumber, const int8_t* pageData) {
+        std::copy_n(pageData, FRAME_SIZE, memory[frameNumber].begin());
+    }
+
+    /**
+     * Retrieves single byte from a specific physicalAddress
+     * @param physicalAddress fully translated memory address
+     * @return byte value of the specified address
+     *
+     * Translation:
+     *  high order bits -> frame number
+     *  low order bits -> offset within the frame
+     */
+    int8_t getValue(uint16_t physicalAddress) const {
+        uint8_t frameNumber = (physicalAddress >> 8) & 0xFF;
+        uint8_t offset = physicalAddress & 0xFF;
+        return memory[frameNumber][offset];
+    }
+};
+
+/** @class BackingStore
+ *  @brief Simulates secondary storage for page loading
+ *
+ */
+class BackingStore {
+private:
+    std::ifstream backingStoreFile;
+public:
+    /**
+     * Constructor: Open BACKING_STORE.bin file
+     * @param fileName path to the BACKING_STORE.bin file
+     *
+     * Terminate if file cannot be opened
+     */
+    explicit BackingStore(const std::string& fileName) {
+        backingStoreFile.open(fileName, std::ios::binary);
+        if (!backingStoreFile) {
+            std::cerr << "Error opening backing store file: " << fileName << std::endl;
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    /**
+     * Destructor: Ensure file is closed
+     */
+    ~BackingStore() {
+        if (backingStoreFile.is_open()) {
+            backingStoreFile.close();
+        }
+    }
+
+    /**
+     * Read a specific page from the backing store
+     * @param pageNumber page to fetch
+     * @param buffer output buffer to store the page contents
+     */
+    void readPage(uint8_t pageNumber, int8_t* buffer) {
+        backingStoreFile.clear(); // Clear any error flags
+        backingStoreFile.seekg(pageNumber * PAGE_SIZE, std::ios::beg);
+        backingStoreFile.read(reinterpret_cast<char*>(buffer), 256);
+
+        if (!backingStoreFile) {
+            std::cerr << "Error reading page from backing store" << std::endl;
+            exit(EXIT_FAILURE);
+        }
+    }
+};
+
+int main(int argc, char* argv[]) {
+    // validate cmd line args
+    if (argc != 2) {
+        std::cerr << "Usage: ./a.out addresses.txt" << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    std::string addressFileName = argv[1];
+
+    TLB tlb;
+    PageTable pageTable;
+    PhysicalMemory physicalMemory;
+    BackingStore backingStore("BACKING_STORE.bin");
+
+    std::ifstream addressFile(addressFileName);
+    if (!addressFile) {
+        std::cerr << "Error opening address file: " << addressFileName << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    uint16_t nextAvailableFrame = 0;
+    int totalAddresses = 0;
+    int tlbHits = 0;
+    int pageFaults = 0;
+
+    // processing each logical address
     std::string line;
-    while (std::getline(address_file, line)) {
-        total_addresses++;
+    while (std::getline(addressFile, line)) {
+        totalAddresses++;
 
-        // Read the logical address and mask to 16 bits
-        int logical_address = std::stoi(line);
-        logical_address = logical_address & 0xFFFF;
+        // convert string to 32-bit unsigned int
+        // ensure that we are working with 16-bit logical address
+        // extract the lower 16 bits of the logical address using 0xFFFF ('1' * 16 in bin)
+        uint32_t logicalAddress = std::stoul(line) & MASK;
 
-        // Extract the page number and offset from logical address
-        int page_number = (logical_address >> 8) & 0xFF;
-        int offset = logical_address & 0xFF;
+        // shift the logical address 8 bits to right i.e. (8-15 -> 0-7)
+        // mask the result to ensure only lower 8 bits are kept
+        uint8_t pageNumber = (logicalAddress >> BITSHIFT) & OFFSET_MASK;    // (8-15) bits of logical address
+        uint8_t offset = logicalAddress & OFFSET_MASK;  // (0-7) bits of logical address
 
-        // Check if page_number is in TLB
-        bool tlb_hit = false;
-        int frame_number = -1;
-        for (const auto& entry : TLB) {
-            if (entry.first == page_number) {
-                frame_number = entry.second;
-                tlb_hit = true;
-                tlb_hits++;
-                break;
-            }
-        }
+        // check in TLB
+        std::optional<uint8_t> frameNumberOpt = tlb.getFrameNumber(pageNumber);
 
-        // If TLB miss, check page table
-        if (!tlb_hit) {
-            if (page_table[page_number] != -1) {
-                // Page is in memory, get the frame number from page table
-                frame_number = page_table[page_number];
-            } else {
-                // Page fault occurs
-                page_faults++;
+        // TLB miss -> proceed to page table
+        if (bool _ = frameNumberOpt.has_value()) {
+            tlbHits++;
+        } else {
+            frameNumberOpt = pageTable.getFrameNumber(pageNumber);
 
-                // Read page from backing store
-                backing_store.seekg(page_number * PAGE_SIZE, std::ios::beg);
-                if (backing_store.fail()) {
-                    std::cerr << "Error: Unable to seek in BACKING_STORE.bin" << std::endl;
-                    return 1;
-                }
+            // page fault -> load page from backing store
+            if (!frameNumberOpt.has_value()) {
+                pageFaults++;
 
-                std::vector<unsigned char> page_data(PAGE_SIZE);
-                backing_store.read(reinterpret_cast<char*>(page_data.data()), PAGE_SIZE);
-                if (backing_store.fail()) {
-                    std::cerr << "Error: Unable to read from BACKING_STORE.bin" << std::endl;
-                    return 1;
-                }
+                // read page from backing store
+                int8_t pageData[PAGE_SIZE];
+                backingStore.readPage(pageNumber, pageData);
 
-                // Load page into physical memory
-                if (next_frame >= FRAMES) {
+                // load page into physical memory
+                physicalMemory.loadPage(nextAvailableFrame, pageData);
+
+                // update page table
+                pageTable.setFrameNumber(pageNumber, nextAvailableFrame);
+
+                // update TLB
+                tlb.addEntry(pageNumber, nextAvailableFrame);
+
+                frameNumberOpt = nextAvailableFrame;
+
+                nextAvailableFrame++;
+                if (nextAvailableFrame >= FRAME_SIZE) {
                     std::cerr << "Error: Physical memory is full." << std::endl;
-                    return 1;
+                    return EXIT_FAILURE;
                 }
-                int start_address = next_frame * PAGE_SIZE;
-                std::copy(page_data.begin(), page_data.end(), physical_memory.begin() + start_address);
-
-                // Update page table
-                frame_number = next_frame;
-                page_table[page_number] = frame_number;
-                next_frame++;
+            } else {
+                // update TLB with page table result
+                tlb.addEntry(pageNumber, frameNumberOpt.value());
             }
-
-            // Add the page number and frame number to the TLB
-            if (TLB.size() >= TLB_SIZE) {
-                TLB.pop_front();  // Remove the oldest entry
-            }
-            TLB.emplace_back(page_number, frame_number);
         }
 
-        // Calculate the physical address
-        int physical_address = (frame_number << 8) | offset;
+        // translate to physical address and capture value
+        uint8_t frameNumber = frameNumberOpt.value();
+        uint16_t physicalAddress = (frameNumber << 8) | offset;
+        int8_t value = physicalMemory.getValue(physicalAddress);
 
-        // Get the value stored at the physical address
-        unsigned char value = physical_memory[physical_address];
-
-        // Output the result
-        std::cout << "Logical Address: " << logical_address
-                  << " Physical Address: " << physical_address
-                  << " Value: " << static_cast<int>(value) << std::endl;
+        // terminal logs
+        std::cout << "Logical Address: 0x" << std::hex << std::setw(4) << std::setfill('0') << logicalAddress
+                  << " Physical Address: 0x" << std::hex << std::setw(4) << std::setfill('0') << physicalAddress
+                  << " Value: " << std::dec << static_cast<int>(value) << std::endl;
     }
 
-    // Print statistics
-    std::cout << "\nStatistics:" << std::endl;
-    std::cout << "Total addresses translated: " << total_addresses << std::endl;
-    std::cout << "TLB Hits: " << tlb_hits << std::endl;
-    std::cout << "TLB Hit Rate: " << std::fixed << std::setprecision(2)
-              << static_cast<double>(tlb_hits) / total_addresses * 100 << "%" << std::endl;
-    std::cout << "Page Faults: " << page_faults << std::endl;
-    std::cout << "Page Fault Rate: " << std::fixed << std::setprecision(2)
-              << static_cast<double>(page_faults) / total_addresses * 100 << "%" << std::endl;
+    // compute stats for display
+    double pageFaultRate = static_cast<double>(pageFaults) / totalAddresses * 100.0;
+    double tlbHitRate = static_cast<double>(tlbHits) / totalAddresses * 100.0;
 
-    return 0;
+    // terminal logs
+    std::cout << "Page Fault Rate = " << pageFaultRate << "%" << std::endl;
+    std::cout << "TLB Hit Rate = " << tlbHitRate << "%" << std::endl;
+
+    return EXIT_SUCCESS;
 }

@@ -1,0 +1,45 @@
+flowchart TD
+    subgraph subGraph0["Address Breakdown"]
+        E["8-bit Page Number"]
+        D["Divide into 2 parts"]
+        F["8-bit Page Offset"]
+    end
+    A["Logical Address: 32-bit Input"] --> B{"Mask Rightmost 16 bits"}
+    B --> C["16-bit Address"]
+    C --> D
+    D --> E & F
+    E --> G{"Check TLB"}
+    G -- TLB Hit --> H["Get Frame Number"]
+    G -- TLB Miss --> I{"Check Page Table"}
+    I -- Page Table Hit --> J["Get Frame Number"]
+    I -- Page Table Miss --> K["Page Fault Handler"]
+    K --> L["Read 256-byte Page from BACKING_STORE"]
+    L --> M["Find Available Page Frame in Physical Memory"]
+    M --> N["Store Page in Selected Frame"]
+    N --> O["Update Page Table"]
+    O --> P["Update TLB"]
+    H --> Q["Calculate Physical Address"]
+    J --> Q
+    P --> Q
+    Q --> R["Physical Memory Access"]
+
+    A:::highlight
+    K:::process
+    L:::process
+    M:::process
+    N:::process
+    O:::process
+    P:::process
+    R:::highlight
+    classDef highlight fill:#f9f,stroke:#333,stroke-width:2px
+    classDef process fill:#bbf,stroke:#333,stroke-width:2px
+    style A fill:#C8E6C9
+    style K fill:#FFE0B2
+    style L fill:#FFE0B2
+    style M fill:#FFE0B2
+    style N fill:#FFE0B2
+    style O fill:#FFE0B2
+    style P fill:#FFE0B2
+    style R fill:#C8E6C9
+
+
