@@ -9,14 +9,14 @@
 #include <optional>
 #include <algorithm>
 
-#define PAGE_TABLE_SIZE 256     // max number of pages in the virtual mem
-#define PAGE_SIZE 256           // size of each page in bytes
-#define TLB_SIZE 16             // buffer size
-#define FRAME_SIZE 256          // size of each physical mem frame
-#define FRAMES 256              // total frames in the physical mem
+#define PAGE_TABLE_SIZE 256 // max number of pages in the virtual mem
+#define PAGE_SIZE 256       // size of each page in bytes
+#define TLB_SIZE 16         // buffer size
+#define FRAME_SIZE 256      // size of each physical mem frame
+#define FRAMES 256          // total frames in the physical mem
 #define BITSHIFT 8
-#define MASK 0xFFFF             // mask to extract the lower 16 bits from the logical address
-#define OFFSET_MASK 0xFF        // mask to extract the lowest 8 bits from logical address
+#define MASK 0xFFFF      // mask to extract the lower 16 bits from the logical address
+#define OFFSET_MASK 0xFF // mask to extract the lowest 8 bits from logical address
 
 using namespace std;
 
@@ -28,12 +28,13 @@ using namespace std;
  *
  */
 class TLB {
-private:
+  private:
     // internal storage for TLB entries
     // using deque to facilitate FIFO replacement strategy
     // entry -> pair of <page number, frame number>
     std::deque<std::pair<uint8_t, uint8_t>> tlbEntries;
-public:
+
+  public:
     /**
      * Searches for a page number in the TLB
      * @param pageNumber the virtual page number to lookup
@@ -65,7 +66,7 @@ public:
 
         // remove any existing entry for the same page to prevent duplicates
         auto iterator = std::find_if(tlbEntries.begin(), tlbEntries.end(),
-                               [&](const auto& entry) { return entry.first == pageNumber; });
+                                     [&](const auto &entry) { return entry.first == pageNumber; });
         if (iterator != tlbEntries.end()) {
             tlbEntries.erase(iterator);
         }
@@ -84,10 +85,11 @@ public:
  *  @brief Manages virtual-to-physical memory mapping
  */
 class PageTable {
-private:
+  private:
     // stores frame numbers, with -1 -> invalid/unloaded page
     std::array<int16_t, PAGE_TABLE_SIZE> pageTable{};
-public:
+
+  public:
     /**
      * Constructor: initialize all entries as invalid (-1)
      */
@@ -102,7 +104,9 @@ public:
      */
     std::optional<uint8_t> getFrameNumber(uint8_t pageNumber) {
         int16_t frameNumber = pageTable[pageNumber];
-        return frameNumber == -1 ? std::nullopt : static_cast<uint8_t>(frameNumber);
+        if (frameNumber != -1)
+            return static_cast<uint8_t>(frameNumber);
+        return std::nullopt;
     }
 
     /**
@@ -119,17 +123,17 @@ public:
  *  @brief Simulates physical memory organization
  */
 class PhysicalMemory {
-private:
+  private:
     // 2D array to represent physical memory frames
     // each frame -> fixed size array of bytes
     std::array<std::array<int8_t, FRAME_SIZE>, FRAMES> memory{}; // Memory frames
-public:
+  public:
     /**
      *  Loads a complete page into a specific memory frame
      * @param frameNumber target frame to load the page into
      * @param pageData pointer of the source pageData
      */
-    void loadPage(uint8_t frameNumber, const int8_t* pageData) {
+    void loadPage(uint8_t frameNumber, const int8_t *pageData) {
         std::copy_n(pageData, FRAME_SIZE, memory[frameNumber].begin());
     }
 
@@ -154,16 +158,17 @@ public:
  *
  */
 class BackingStore {
-private:
+  private:
     std::ifstream backingStoreFile;
-public:
+
+  public:
     /**
      * Constructor: Open BACKING_STORE.bin file
      * @param fileName path to the BACKING_STORE.bin file
      *
      * Terminate if file cannot be opened
      */
-    explicit BackingStore(const std::string& fileName) {
+    explicit BackingStore(const std::string &fileName) {
         backingStoreFile.open(fileName, std::ios::binary);
         if (!backingStoreFile) {
             std::cerr << "Error opening backing store file: " << fileName << std::endl;
@@ -185,10 +190,10 @@ public:
      * @param pageNumber page to fetch
      * @param buffer output buffer to store the page contents
      */
-    void readPage(uint8_t pageNumber, int8_t* buffer) {
+    void readPage(uint8_t pageNumber, int8_t *buffer) {
         backingStoreFile.clear(); // Clear any error flags
         backingStoreFile.seekg(pageNumber * PAGE_SIZE, std::ios::beg);
-        backingStoreFile.read(reinterpret_cast<char*>(buffer), 256);
+        backingStoreFile.read(reinterpret_cast<char *>(buffer), 256);
 
         if (!backingStoreFile) {
             std::cerr << "Error reading page from backing store" << std::endl;
@@ -197,7 +202,7 @@ public:
     }
 };
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
     // validate cmd line args
     if (argc != 2) {
         std::cerr << "Usage: ./a.out addresses.txt" << std::endl;
@@ -234,8 +239,8 @@ int main(int argc, char* argv[]) {
 
         // shift the logical address 8 bits to right i.e. (8-15 -> 0-7)
         // mask the result to ensure only lower 8 bits are kept
-        uint8_t pageNumber = (logicalAddress >> BITSHIFT) & OFFSET_MASK;    // (8-15) bits of logical address
-        uint8_t offset = logicalAddress & OFFSET_MASK;  // (0-7) bits of logical address
+        uint8_t pageNumber = (logicalAddress >> BITSHIFT) & OFFSET_MASK; // (8-15) bits of logical address
+        uint8_t offset = logicalAddress & OFFSET_MASK;                   // (0-7) bits of logical address
 
         // check in TLB
         std::optional<uint8_t> frameNumberOpt = tlb.getFrameNumber(pageNumber);
@@ -282,9 +287,9 @@ int main(int argc, char* argv[]) {
         int8_t value = physicalMemory.getValue(physicalAddress);
 
         // terminal logs
-        std::cout << "Logical Address: 0x" << std::hex << std::setw(4) << std::setfill('0') << logicalAddress
-                  << " Physical Address: 0x" << std::hex << std::setw(4) << std::setfill('0') << physicalAddress
-                  << " Value: " << std::dec << static_cast<int>(value) << std::endl;
+        std::cout << "0x" << std::hex << std::setw(4) << std::setfill('0') << logicalAddress
+                  << " -> 0x" << std::hex << std::setw(4) << std::setfill('0') << physicalAddress
+                  << " -> " << std::dec << static_cast<int>(value) << std::endl;
     }
 
     // compute stats for display
