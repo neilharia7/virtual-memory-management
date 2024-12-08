@@ -229,6 +229,13 @@ int main(int argc, char *argv[]) {
 
     // processing each logical address
     std::string line;
+
+    std::ofstream outputFile("correct.txt");
+    if (!outputFile) {
+        std::cerr << "Error opening correct.txt file: " << std::endl;
+        return EXIT_FAILURE;
+    }
+
     while (std::getline(addressFile, line)) {
         totalAddresses++;
 
@@ -290,6 +297,11 @@ int main(int argc, char *argv[]) {
         std::cout << "0x" << std::hex << std::setw(4) << std::setfill('0') << logicalAddress
                   << " -> 0x" << std::hex << std::setw(4) << std::setfill('0') << physicalAddress
                   << " -> " << std::dec << static_cast<int>(value) << std::endl;
+
+        // write logs to file
+        outputFile << "0x" << std::hex << std::setw(4) << std::setfill('0') << logicalAddress
+                  << " -> 0x" << std::hex << std::setw(4) << std::setfill('0') << physicalAddress
+                  << " -> " << std::dec << static_cast<int>(value) << std::endl;
     }
 
     // compute stats for display
@@ -299,6 +311,11 @@ int main(int argc, char *argv[]) {
     // terminal logs
     std::cout << "Page Fault Rate = " << pageFaultRate << "%" << std::endl;
     std::cout << "TLB Hit Rate = " << tlbHitRate << "%" << std::endl;
+
+    outputFile << "Page Fault Rate = " << pageFaultRate << "%" << std::endl;
+    outputFile << "TLB Hit Rate = " << tlbHitRate << "%" << std::endl;
+
+    outputFile.close();
 
     return EXIT_SUCCESS;
 }
